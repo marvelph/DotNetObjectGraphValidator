@@ -4,35 +4,48 @@
 //  ObjectGraphValidator.cs
 //  DotNetObjectGraphValidator
 //
-//  Copyright 2016 Kenji Nishishiro. All rights reserved.
+//  Copyright 2016-2017 Kenji Nishishiro. All rights reserved.
 //  Written by Kenji Nishishiro <marvel@programmershigh.org>.
 //
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Serialization;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Marvelph.ObjectGraphValidator
 {
+    [Serializable]
     public class ValidateException : Exception
     {
-        public ValidateException(string message, Schema schema, object objectGraph)
+        public ValidateException(string message, string path)
             : base(message)
         {
-            this.Schema = schema;
-            this.ObjectGraph = objectGraph;
+            if (path == null)
+            {
+                throw new ArgumentNullException();
+            }
+
+            this.Path = path;
         }
 
-        public Schema Schema { get; }
-        public object ObjectGraph { get; }
+        public override void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            base.GetObjectData(info, context);
+
+            info.AddValue("Path", this.Path);
+        }
+
+        public string Path { get; }
     }
 
+    [Serializable]
     public class CompositValidateException : ValidateException
     {
-        public CompositValidateException(string message, Schema schema, object objectGraph, ValidateException[] exceptions)
-            : base(message, schema, objectGraph)
+        public CompositValidateException(string message, string path, ValidateException[] exceptions)
+            : base(message, path)
         {
             if (exceptions == null)
             {
@@ -42,12 +55,19 @@ namespace Marvelph.ObjectGraphValidator
             this.Exceptions = exceptions;
         }
 
+        public override void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            base.GetObjectData(info, context);
+
+            info.AddValue("Exceptions", this.Exceptions);
+        }
+
         public ValidateException[] Exceptions { get; }
     }
 
     public abstract class Schema
     {
-        public abstract object Validate(object objectGraph, bool extra = false);
+        public abstract object Validate(object objectGraph, string path = "", bool extra = false);
     }
 
     public abstract class Marker : Schema
@@ -62,9 +82,9 @@ namespace Marvelph.ObjectGraphValidator
             this.schema = schema;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            return this.schema.Validate(objectGraph, extra);
+            return this.schema.Validate(objectGraph, path, extra);
         }
 
         private Schema schema;
@@ -84,7 +104,7 @@ namespace Marvelph.ObjectGraphValidator
 
     public abstract class Type<T> : Type
     {
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
             if (objectGraph != null)
             {
@@ -94,7 +114,7 @@ namespace Marvelph.ObjectGraphValidator
                 }
                 else
                 {
-                    throw new ValidateException("Type mismatch.", this, objectGraph);
+                    throw new ValidateException($"Type mismatch : {path}", path);
                 }
             }
             else
@@ -114,7 +134,7 @@ namespace Marvelph.ObjectGraphValidator
 
     public class LongType : Type
     {
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
             if (objectGraph != null)
             {
@@ -128,7 +148,7 @@ namespace Marvelph.ObjectGraphValidator
                 }
                 else
                 {
-                    throw new ValidateException("Type mismatch.", this, objectGraph);
+                    throw new ValidateException($"Type mismatch : {path}", path);
                 }
             }
             else
@@ -140,7 +160,7 @@ namespace Marvelph.ObjectGraphValidator
 
     public class DecimalType : Type
     {
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
             if (objectGraph != null)
             {
@@ -158,7 +178,7 @@ namespace Marvelph.ObjectGraphValidator
                 }
                 else
                 {
-                    throw new ValidateException("Type mismatch.", this, objectGraph);
+                    throw new ValidateException($"Type mismatch : {path}", path);
                 }
             }
             else
@@ -170,7 +190,7 @@ namespace Marvelph.ObjectGraphValidator
 
     public class DoubleType : Type
     {
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
             if (objectGraph != null)
             {
@@ -192,7 +212,7 @@ namespace Marvelph.ObjectGraphValidator
                 }
                 else
                 {
-                    throw new ValidateException("Type mismatch.", this, objectGraph);
+                    throw new ValidateException($"Type mismatch : {path}", path);
                 }
             }
             else
@@ -213,7 +233,7 @@ namespace Marvelph.ObjectGraphValidator
             this.schema = schema;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
             if (objectGraph != null)
             {
@@ -222,13 +242,13 @@ namespace Marvelph.ObjectGraphValidator
                     List<object> normalized = new List<object>();
                     foreach (object item in (IList<object>)objectGraph)
                     {
-                        normalized.Add(this.schema.Validate(item, extra));
+                        normalized.Add(this.schema.Validate(item, $"{path}/{normalized.Count}", extra));
                     }
                     return normalized.ToArray<object>();
                 }
                 else
                 {
-                    throw new ValidateException("Type mismatch.", this, objectGraph);
+                    throw new ValidateException($"Type mismatch : {path}", path);
                 }
             }
             else
@@ -252,7 +272,7 @@ namespace Marvelph.ObjectGraphValidator
             this.schemas = schemas;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
             if (objectGraph != null)
             {
@@ -264,7 +284,7 @@ namespace Marvelph.ObjectGraphValidator
                         {
                             if (!(pair.Value is OptionalMarker))
                             {
-                                throw new ValidateException("Missing key.", this, objectGraph);
+                                throw new ValidateException($"Missing key : {path}/{pair.Key}", $"{path}/{pair.Key}");
                             }
                         }
                     }
@@ -273,18 +293,18 @@ namespace Marvelph.ObjectGraphValidator
                     {
                         if (this.schemas.ContainsKey(pair.Key))
                         {
-                            normalized.Add(pair.Key, this.schemas[pair.Key].Validate(pair.Value, extra));
+                            normalized.Add(pair.Key, this.schemas[pair.Key].Validate(pair.Value, $"{path}/{pair.Key}", extra));
                         }
                         else if (!extra)
                         {
-                            throw new ValidateException("Extra key.", this, objectGraph);
+                            throw new ValidateException($"Extra key : {path}/{pair.Key}", $"{path}/{pair.Key}");
                         }
                     }
                     return normalized;
                 }
                 else
                 {
-                    throw new ValidateException("Type mismatch.", this, objectGraph);
+                    throw new ValidateException($"Type mismatch : {path}", path);
                 }
             }
             else
@@ -308,9 +328,9 @@ namespace Marvelph.ObjectGraphValidator
             this.schema = schema;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            return this.schema.Validate(objectGraph, extra);
+            return this.schema.Validate(objectGraph, path, extra);
         }
 
         private Schema schema;
@@ -323,12 +343,12 @@ namespace Marvelph.ObjectGraphValidator
         {
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph == null)
             {
-                throw new ValidateException("Required value.", this, objectGraph);
+                throw new ValidateException($"Required value : {path}", path);
             }
             return objectGraph;
         }
@@ -372,9 +392,9 @@ namespace Marvelph.ObjectGraphValidator
             this.modifier = new EqualModifier<bool>(schema, value);
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            return this.modifier.Validate(objectGraph, extra);
+            return this.modifier.Validate(objectGraph, path, extra);
         }
 
         private Modifier modifier;
@@ -388,22 +408,22 @@ namespace Marvelph.ObjectGraphValidator
             this.value = value;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is T)
                 {
                     if (!((T)objectGraph).Equals(this.value))
                     {
-                        throw new ValidateException("Not equal.", this, objectGraph);
+                        throw new ValidateException($"Not equal : {path}", path);
 
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't equal.", this, objectGraph);
+                    throw new ValidateException($"Can't equal : {path}", path);
                 }
             }
             return objectGraph;
@@ -450,9 +470,9 @@ namespace Marvelph.ObjectGraphValidator
             this.modifier = new EnumModifier<bool>(schema, values);
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            return this.modifier.Validate(objectGraph, extra);
+            return this.modifier.Validate(objectGraph, path, extra);
         }
 
         private Modifier modifier;
@@ -471,21 +491,21 @@ namespace Marvelph.ObjectGraphValidator
             this.values = values;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path,  extra);
             if (objectGraph != null)
             {
                 if (objectGraph is T)
                 {
                     if (!this.values.Contains((T)objectGraph))
                     {
-                        throw new ValidateException("Not enum constant.", this, objectGraph);
+                        throw new ValidateException($"Not enum constant : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't check enum.", this, objectGraph);
+                    throw new ValidateException($"Can't check enum : {path}", path);
                 }
             }
             return objectGraph;
@@ -503,25 +523,25 @@ namespace Marvelph.ObjectGraphValidator
             this.max = max;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is string)
                 {
                     if (this.min != null && ((string)objectGraph).Length < this.min)
                     {
-                        throw new ValidateException("Too short.", this, objectGraph);
+                        throw new ValidateException($"Too short : {path}", path);
                     }
                     else if (this.max != null && ((string)objectGraph).Length > this.max)
                     {
-                        throw new ValidateException("Too long.", this, objectGraph);
+                        throw new ValidateException($"Too long : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't check length.", this, objectGraph);
+                    throw new ValidateException($"Can't check length : {path}", path);
                 }
             }
             return objectGraph;
@@ -538,21 +558,21 @@ namespace Marvelph.ObjectGraphValidator
         {
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is string)
                 {
                     if (Encoding.UTF8.GetByteCount((string)objectGraph) != ((string)objectGraph).Length)
                     {
-                        throw new ValidateException("Not ascii.", this, objectGraph);
+                        throw new ValidateException($"Not ascii : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't check ascii.", this, objectGraph);
+                    throw new ValidateException($"Can't check ascii : {path}", path);
                 }
             }
             return objectGraph;
@@ -572,21 +592,21 @@ namespace Marvelph.ObjectGraphValidator
             this.regex = new Regex(pattern);
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is string)
                 {
                     if (!this.regex.IsMatch((string)objectGraph))
                     {
-                        throw new ValidateException("Don't match.", this, objectGraph);
+                        throw new ValidateException($"Don't match : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't match.", this, objectGraph);
+                    throw new ValidateException($"Can't match : {path}", path);
                 }
             }
             return objectGraph;
@@ -621,9 +641,9 @@ namespace Marvelph.ObjectGraphValidator
             this.modifier = new RangeModifier<double>(schema, min, max, minIncluded, maxIncluded);
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            return this.modifier.Validate(objectGraph, extra);
+            return this.modifier.Validate(objectGraph, path, extra);
         }
 
         private Modifier modifier;
@@ -640,33 +660,33 @@ namespace Marvelph.ObjectGraphValidator
             this.maxIncluded = maxIncluded;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is T)
                 {
                     if (this.min != null && minIncluded && ((T)objectGraph).CompareTo((T)this.min) < 0)
                     {
-                        throw new ValidateException("Too small.", this, objectGraph);
+                        throw new ValidateException($"Too small : {path}", path);
                     }
                     else if (this.min != null && !minIncluded && ((T)objectGraph).CompareTo((T)this.min) <= 0)
                     {
-                        throw new ValidateException("Too small.", this, objectGraph);
+                        throw new ValidateException($"Too small : {path}", path);
                     }
                     else if (this.max != null && maxIncluded && ((T)objectGraph).CompareTo((T)this.max) > 0)
                     {
-                        throw new ValidateException("Too large.", this, objectGraph);
+                        throw new ValidateException($"Too large : {path}", path);
                     }
                     else if (this.max != null && !maxIncluded && ((T)objectGraph).CompareTo((T)this.max) >= 0)
                     {
-                        throw new ValidateException("Too large.", this, objectGraph);
+                        throw new ValidateException($"Too large : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't compare.", this, objectGraph);
+                    throw new ValidateException($"Can't compare : {path}", path);
                 }
             }
             return objectGraph;
@@ -687,25 +707,25 @@ namespace Marvelph.ObjectGraphValidator
             this.max = max;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is IList<object>)
                 {
                     if (this.min != null && ((IList<object>)objectGraph).Count < this.min)
                     {
-                        throw new ValidateException("Too short.", this, objectGraph);
+                        throw new ValidateException($"Too short : {path}", path);
                     }
                     else if (this.max != null && ((IList<object>)objectGraph).Count > this.max)
                     {
-                        throw new ValidateException("Too long.", this, objectGraph);
+                        throw new ValidateException($"Too long : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't count.", this, objectGraph);
+                    throw new ValidateException($"Can't count : {path}", path);
                 }
             }
             return objectGraph;
@@ -728,9 +748,9 @@ namespace Marvelph.ObjectGraphValidator
             this.func = func;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is string)
@@ -742,12 +762,12 @@ namespace Marvelph.ObjectGraphValidator
                     }
                     else
                     {
-                        throw new ValidateException("Don't convert.", this, objectGraph);
+                        throw new ValidateException($"Don't convert : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't convert.", this, objectGraph);
+                    throw new ValidateException($"Can't convert : {path}", path);
                 }
             }
             return null;
@@ -769,9 +789,9 @@ namespace Marvelph.ObjectGraphValidator
             this.func = func;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
-            objectGraph = base.Validate(objectGraph, extra);
+            objectGraph = base.Validate(objectGraph, path, extra);
             if (objectGraph != null)
             {
                 if (objectGraph is string)
@@ -782,12 +802,12 @@ namespace Marvelph.ObjectGraphValidator
                     }
                     else
                     {
-                        throw new ValidateException("Don't validate.", this, objectGraph);
+                        throw new ValidateException($"Don't validate : {path}", path);
                     }
                 }
                 else
                 {
-                    throw new ValidateException("Can't validate.", this, objectGraph);
+                    throw new ValidateException($"Can't validate : {path}", path);
                 }
             }
             return null;
@@ -812,21 +832,21 @@ namespace Marvelph.ObjectGraphValidator
             this.schemas = schemas;
         }
 
-        public override object Validate(object objectGraph, bool extra = false)
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
         {
             List<ValidateException> exceptions = new List<ValidateException>();
             foreach (Schema schema in this.schemas)
             {
                 try
                 {
-                    return schema.Validate(objectGraph, extra);
+                    return schema.Validate(objectGraph, path, extra);
                 }
                 catch (ValidateException exception)
                 {
                     exceptions.Add(exception);
                 }
             }
-            throw new CompositValidateException("All failure.", this, objectGraph, exceptions.ToArray());
+            throw new CompositValidateException($"All failure : {path}", path, exceptions.ToArray());
         }
 
         private Schema[] schemas;
