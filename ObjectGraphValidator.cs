@@ -4,7 +4,7 @@
 //  ObjectGraphValidator.cs
 //  DotNetObjectGraphValidator
 //
-//  Copyright 2016-2017 Kenji Nishishiro. All rights reserved.
+//  Copyright 2016-2018 Kenji Nishishiro. All rights reserved.
 //  Written by Kenji Nishishiro <marvel@programmershigh.org>.
 //
 
@@ -551,11 +551,12 @@ namespace Marvelph.ObjectGraphValidator
         private int? max;
     }
 
-    public class AsciiModifier : Modifier
+    public class DigitModifier : Modifier
     {
-        public AsciiModifier(Schema schema)
+        public DigitModifier(Schema schema)
             : base(schema)
         {
+            this.regex = new Regex(@"^[\x30-\x39]*$");
         }
 
         public override object Validate(object objectGraph, string path = "", bool extra = false)
@@ -565,7 +566,38 @@ namespace Marvelph.ObjectGraphValidator
             {
                 if (objectGraph is string)
                 {
-                    if (Encoding.UTF8.GetByteCount((string)objectGraph) != ((string)objectGraph).Length)
+                    if (!this.regex.IsMatch((string)objectGraph))
+                    {
+                        throw new ValidateException($"Not digit : {path}", path);
+                    }
+                }
+                else
+                {
+                    throw new ValidateException($"Can't check digit : {path}", path);
+                }
+            }
+            return objectGraph;
+        }
+
+        private Regex regex;
+    }
+
+    public class AsciiModifier : Modifier
+    {
+        public AsciiModifier(Schema schema)
+            : base(schema)
+        {
+            this.regex = new Regex(@"^[\x20-\x7E]*$");
+        }
+
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
+        {
+            objectGraph = base.Validate(objectGraph, path, extra);
+            if (objectGraph != null)
+            {
+                if (objectGraph is string)
+                {
+                    if (!this.regex.IsMatch((string)objectGraph))
                     {
                         throw new ValidateException($"Not ascii : {path}", path);
                     }
@@ -577,11 +609,51 @@ namespace Marvelph.ObjectGraphValidator
             }
             return objectGraph;
         }
+
+        private Regex regex;
+    }
+
+    public class UnicodeModifier : Modifier
+    {
+        public UnicodeModifier(Schema schema, bool exceptLineFeed = false)
+            : base(schema)
+        {
+            if (exceptLineFeed)
+            {
+                this.regex = new Regex(@"^[^\x00-\x09\x0B-\x1F\x7F\x80-\x9F]*$");
+            }
+            else
+            {
+                this.regex = new Regex(@"^[^\x00-\x1F\x7F\x80-\x9F]*$");
+            }
+        }
+
+        public override object Validate(object objectGraph, string path = "", bool extra = false)
+        {
+            objectGraph = base.Validate(objectGraph, path, extra);
+            if (objectGraph != null)
+            {
+                if (objectGraph is string)
+                {
+                    if (!this.regex.IsMatch((string)objectGraph))
+                    {
+                        throw new ValidateException($"Not unicode : {path}", path);
+                    }
+                }
+                else
+                {
+                    throw new ValidateException($"Can't check unicode : {path}", path);
+                }
+            }
+            return objectGraph;
+        }
+
+        private Regex regex;
     }
 
     public class MatchModifier : Modifier
     {
-        public MatchModifier(Schema schema, string pattern)
+        public MatchModifier(Schema schema, string pattern, RegexOptions options = RegexOptions.None)
             : base(schema)
         {
             if (pattern == null)
@@ -589,7 +661,7 @@ namespace Marvelph.ObjectGraphValidator
                 throw new ArgumentNullException();
             }
 
-            this.regex = new Regex(pattern);
+            this.regex = new Regex(pattern, options);
         }
 
         public override object Validate(object objectGraph, string path = "", bool extra = false)
@@ -651,7 +723,7 @@ namespace Marvelph.ObjectGraphValidator
 
     internal class RangeModifier<T> : Modifier where T : struct, IComparable<T>
     {
-        public RangeModifier(Schema schema, T? min, T? max, bool minIncluded, bool maxIncluded)
+        public RangeModifier(Schema schema, T? min = null, T? max = null, bool minIncluded = true, bool maxIncluded = true)
             : base(schema)
         {
             this.min = min;
